@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>基于蚁群算法的主动建图演示</title>
+    <style>
+        :root { --primary-color: #007bff; --secondary-color: #6c757d; --bg-color: #f8f9fa; --header-bg: #343a40; --sidebar-bg: #ffffff; --text-color: #212529; --light-gray: #dee2e6; --danger-color: #dc3545; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; background-color: var(--bg-color); display: flex; flex-direction: column; height: 100vh; color: var(--text-color); }
+        .hidden { display: none !important; }
+        header { background-color: var(--header-bg); color: white; padding: 1rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1 { margin: 0; font-size: 1.5rem; }
+        .container { display: flex; flex: 1; overflow: hidden; }
+        .sidebar { width: 400px; background-color: var(--sidebar-bg); padding: 1.5rem; overflow-y: auto; border-right: 1px solid var(--light-gray); display: flex; flex-direction: column; flex-shrink: 0; }
+        
+        .main-content { flex: 1; padding: 1.5rem; display: flex; flex-direction: row; overflow: hidden; gap: 1.5rem; }
+        
+        .tab-content { display: flex; flex-direction: column; min-width: 0; }
+        #visualizer-tab { flex: 2 1 65%; } 
+        #explanation-tab { flex: 1 1 35%; } 
+
+        .visualizer-container { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #e9ecef; border-radius: 8px; padding: 1rem; }
+        canvas { background-color: white; border: 1px solid #ccc; max-width: 100%; max-height: 100%; object-fit: contain; }
+        h2 { color: var(--header-bg); border-bottom: 2px solid var(--primary-color); padding-bottom: 0.5rem; margin-top: 0; }
+        h3,h4 { color: var(--header-bg); margin-top: 1.5rem; }
+        .param-group { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 0.5rem; font-weight: 500; }
+        input, select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { background-color: var(--primary-color); color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-size: 1rem; width: 100%; transition: background-color 0.2s; margin-top: 10px; }
+        button:hover:not(:disabled) { background-color: #0056b3; }
+        button:disabled { background-color: #a0a0a0; cursor: not-allowed; }
+        .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+        .stat-card { background-color: white; padding: 1rem; border-radius: 8px; text-align: center; border: 1px solid var(--light-gray); }
+        .stat-card .label { font-size: 0.9rem; color: #555; }
+        .stat-card .value { font-size: 1.5rem; font-weight: bold; color: var(--header-bg); }
+        .value.error { color: var(--danger-color); }
+        #drawing-canvas { border: 1px dashed var(--secondary-color); cursor: crosshair; margin-bottom: 10px; }
+        .draw-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        
+        #explanation-tab { overflow-y: auto; background-color: #fff; border: 1px solid var(--light-gray); border-radius: 8px; padding: 1.5rem; }
+        #explanation-tab p { line-height: 1.6; }
+        #explanation-tab code { background-color: #e9ecef; padding: 2px 6px; border-radius: 4px; font-family: "Courier New", Courier, monospace; }
+        #explanation-tab h4 { color: var(--primary-color); margin-top: 1rem; margin-bottom: 0.5rem;}
+    </style>
+</head>
+<body>
+    <header><h1>基于蚁群算法的主动建图演示</h1></header>
+    <div class="container">
+        <aside class="sidebar">
+             <h2>⚙️ 配置</h2>
+            <div class="param-group"><label for="mode-switch">选择模式:</label><select id="mode-switch"><option value="path_planning">路径规划 (已知地图)</option><option value="exploration">自主构图 (未知环境)</option></select></div>
+            <div id="map-creation-panel">
+                <h3>🗺️ 地图创建</h3>
+                <div class="param-group"><label for="map-source">地图来源:</label><select id="map-source"><option value="generate">程序生成</option><option value="draw">手绘地图</option></select></div>
+                <div id="generate-map-panel">
+                    <div class="param-group"><label for="map-width">地图宽度: <span id="map-width-val">40</span></label><input type="range" id="map-width" min="20" max="80" value="40"></div>
+                    <div class="param-group"><label for="map-height">地图高度: <span id="map-height-val">30</span></label><input type="range" id="map-height" min="20" max="60" value="30"></div>
+                    <div class="param-group"><label for="map-type">生成类型:</label><select id="map-type"><option value="random">随机</option><option value="deceptive_hallway">欺骗性走廊</option></select></div>
+                    <div class="param-group" id="obstacle-perc-group"><label for="obstacle-perc">障碍物比例: <span id="obstacle-perc-val">0.25</span></label><input type="range" id="obstacle-perc" min="0.0" max="0.5" value="0.15" step="0.01"></div>
+                    <button id="generate-map-btn">生成新地图</button>
+                </div>
+                <div id="draw-map-panel" class="hidden">
+                    <p style="font-size: 0.8em; color: #555; text-align: center;">按住鼠标绘制障碍，Shift+鼠标清除。</p>
+                    <canvas id="drawing-canvas"></canvas>
+                    <div class="draw-buttons">
+                        <button id="clear-canvas-btn" style="background-color: var(--secondary-color);">清空画布</button>
+                        <button id="confirm-draw-btn">应用此地图</button>
+                    </div>
+                </div>
+            </div>
+            <div id="params-panel">
+                <h3>🐜 算法参数</h3>
+                <div id="path-planning-params">
+                    <div class="param-group"><label for="n-ants-pp">蚂蚁数量: <span id="n-ants-pp-val">20</span></label><input type="range" id="n-ants-pp" min="5" max="100" value="20"></div>
+                    <div class="param-group"><label for="n-iterations-pp">迭代次数: <span id="n-iterations-pp-val">120</span></label><input type="range" id="n-iterations-pp" min="10" max="200" value="120"></div>
+                </div>
+                <div id="exploration-params" class="hidden">
+                    <div class="param-group"><label for="sensor-range">机器人传感器范围: <span id="sensor-range-val">5</span></label><input type="range" id="sensor-range" min="2" max="15" value="5"></div>
+                </div>
+                <div class="param-group"><label for="alpha">Alpha (信息素影响): <span id="alpha-val">1.0</span></label><input type="range" id="alpha" min="0.0" max="5.0" value="1.0" step="0.1"></div>
+                <div class="param-group"><label for="beta">Beta (启发式影响): <span id="beta-val">2.5</span></label><input type="range" id="beta" min="0.0" max="10.0" value="2.5" step="0.1"></div>
+                <div class="param-group"><label for="evaporation">信息素蒸发率: <span id="evaporation-val">0.3</span></label><input type="range" id="evaporation" min="0.0" max="1.0" value="0.3" step="0.01"></div>
+                <div class="param-group"><label for="use-elitist"><input type="checkbox" id="use-elitist" checked> 使用精英蚂蚁系统 (仅路径规划)</label></div>
+            </div>
+            <button id="run-simulation-btn" disabled>▶️ 运行模拟</button>
+        </aside>
+        <main class="main-content">
+            <div id="visualizer-tab" class="tab-content">
+                <div class="visualizer-container" id="visualizer-container"><canvas id="main-canvas"></canvas></div>
+                <div class="stats">
+                    <div class="stat-card"><div class="label" id="stat1-label">模拟状态</div><div id="status-text" class="value">正在连接服务器...</div></div>
+                    <div class="stat-card"><div class="label" id="stat2-label">路径长度 / 进度</div><div id="info-text" class="value">N/A</div></div>
+                </div>
+            </div>
+            <div id="explanation-tab" class="tab-content">
+                <h2>算法与参数详解</h2>
+                <h3>核心算法</h3>
+                <p>本项目演示了两种基于蚁群优化(Ant Colony Optimization, ACO)的算法：</p>
+                <ul>
+                    <li><strong>路径规划 (Path Planning):</strong> 在一个完全已知的地图上，利用ACO寻找从起点到终点的最优路径。</li>
+                    <li><strong>自主构图 (Exploration):</strong> 模拟一个机器人在未知环境中，利用传感器和一种基于ACO的探索策略来逐步构建地图。</li>
+                </ul>
+                <h3>通用参数 (ACO核心)</h3>
+                <p>这些参数同时影响路径规划和自主构图中的蚂蚁行为。</p>
+                <h4>Alpha (信息素影响因子)</h4>
+                <p>控制了路径上已存在的信息素对蚂蚁决策的影响程度。<code>Alpha</code> 值越高，蚂蚁越倾向于跟随之前蚂蚁走过的、信息素浓度高的路径。这会加速收敛，但也可能过早地陷入局部最优解。</p>
+                <h4>Beta (启发式影响因子)</h4>
+                <p>控制了启发式信息（即预先计算的、通往目标有多“划算”的信息）对蚂蚁决策的影响。
+                    <ul>
+                       <li>在<strong>路径规划</strong>中，启发信息是当前点到终点的直线距离的倒数。<code>Beta</code> 越高，蚂蚁越倾向于朝向终点直线前进，是一种贪心策略。</li>
+                       <li>在<strong>自主构图</strong>中，启发信息是前往未知区域（Frontier）的“奖励”，距离机器人越近的边界点，启发值越高。<code>Beta</code> 越高，机器人越有动力去探索最近的未知边界。</li>
+                    </ul>
+                </p>
+                <h4>信息素蒸发率 (Evaporation Rate)</h4>
+                <p>模拟了真实世界中信息素随时间蒸发的现象。每一轮迭代后，地图上所有信息素都会乘以 <code>(1.0 - evaporation_rate)</code>。这有助于避免算法过早停滞，允许蚂蚁探索新的路径。一个较高的蒸发率意味着“遗忘”得更快，有利于探索；较低的蒸发率则有利于加强最优路径。</p>
+
+                <h3>路径规划模式特定参数</h3>
+                <h4>蚂蚁数量 (n_ants_pp)</h4>
+                <p>每一轮迭代中释放的蚂蚁总数。更多的蚂蚁可以更全面地探索地图，但会增加计算开销。</p>
+                
+                <h4>迭代次数 (n_iterations_pp)</h4>
+                <p>算法运行的总轮数。更多的迭代次数给予算法更多时间来优化和收敛到最优路径。</p>
+                
+                <h4>精英蚂蚁系统 (Elitist Ant System)</h4>
+                <p>如果启用，每一轮迭代后，会给当前找到的“全局最优路径”一个额外的、权重更高的信息素奖励。这极大地加快了收敛速度，能更快地找到高质量的解。</p>
+                
+                <h3>自主构图模式特定参数</h3>
+                <h4>机器人传感器范围 (sensor_range)</h4>
+                <p>机器人能“看”多远。它决定了机器人每次移动后能将多大范围的未知区域（`UNKNOWN`）变为已知区域（`FREE` 或 `OBSTACLE`）。</p>
+                <p><strong>注意: </strong>在自主构图模式下，侧边栏中的“蚂蚁数量”和“迭代次数”参数**不会被使用**。该模式下的内部决策使用了固定的、预设好的参数来平衡探索效率和计算开销。</p>
+            </div>
+        </main>
+    </div>
+
+<script>
+
+class Renderer {
+    constructor(canvas) { this.canvas = canvas; this.ctx = canvas.getContext('2d'); this.cellSize = 15; this.colors = { FREE: "#f8fff8", OBSTACLE: "#3C3C3C", UNKNOWN: "#e0e0e0", START: "#32CD32", GOAL: "#FFA500", ROBOT: "#FF4500", PATH: "#1E90FF", ASTAR_PATH: "#FF4500", FRONTIER: "#DAA520", ANT_PATHS: ["#8A2BE2", "#00CED1", "#FFD700", "#FF69B4", "#7FFF00"], PHEROMONE_BASE: [40, 40, 220] }; }
+    resize(width, height) { if (!this.canvas) return; this.canvas.width = width * this.cellSize; this.canvas.height = height * this.cellSize; }
+    drawGrid(grid, typeMap) { if (!this.ctx || !grid) return; this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height); grid.forEach((row, r) => { row.forEach((cell, c) => { this.ctx.fillStyle = this.colors[typeMap[cell]]; this.ctx.fillRect(c * this.cellSize, r * this.cellSize, this.cellSize, this.cellSize); }); }); }
+    drawPheromones(pheromoneMap, grid) { if (!pheromoneMap || !grid || !this.ctx) return; const flatPheromones = pheromoneMap.flat().filter(p => p !== null && isFinite(p)); if (flatPheromones.length === 0) return; const maxPheromone = Math.max(...flatPheromones); if (maxPheromone <= 0.011) return; const base = this.colors.PHEROMONE_BASE; pheromoneMap.forEach((row, r) => { row.forEach((pher, c) => { if (grid[r][c] !== 2 && pher > 0.011) { const norm = Math.min(pher / maxPheromone, 1.0); const alpha = 0.05 + Math.pow(norm, 2) * 0.7; this.ctx.fillStyle = `rgba(${base[0]}, ${base[1]}, ${100 + norm * 155}, ${alpha})`; this.ctx.fillRect(c * this.cellSize, r * this.cellSize, this.cellSize, this.cellSize); } }); }); }
+    drawPath(path, colorKey, lineWidth = 1, lineDash = []) { if (!path || !Array.isArray(path) || path.length < 2 || !this.ctx) return; const ctx = this.ctx; ctx.strokeStyle = this.colors[colorKey] || "#000000"; ctx.lineWidth = Math.max(1.5, lineWidth * (this.cellSize / 10)); ctx.setLineDash(lineDash); ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.beginPath(); ctx.moveTo((path[0][1] + 0.5) * this.cellSize, (path[0][0] + 0.5) * this.cellSize); for (let i = 1; i < path.length; i++) { ctx.lineTo((path[i][1] + 0.5) * this.cellSize, (path[i][0] + 0.5) * this.cellSize); } ctx.stroke(); ctx.setLineDash([]); }
+    drawCircle(pos, colorKey) { if (!pos || !Array.isArray(pos) || !this.ctx) return; const [r, c] = pos; this.ctx.fillStyle = this.colors[colorKey]; this.ctx.beginPath(); this.ctx.arc((c + 0.5) * this.cellSize, (r + 0.5) * this.cellSize, this.cellSize * 0.4, 0, 2 * Math.PI); this.ctx.fill(); }
+    render(frameData) { if (frameData.mode === 'planning') { this.drawGrid(frameData.grid, { 1: 'FREE', 2: 'OBSTACLE' }); if (frameData.pheromone_map) this.drawPheromones(frameData.pheromone_map, frameData.grid); if (frameData.ant_paths) frameData.ant_paths.forEach((p, i) => this.drawPath(p, this.colors.ANT_PATHS[i % this.colors.ANT_PATHS.length], 1)); this.drawCircle(frameData.start_pos, 'START'); this.drawCircle(frameData.goal_pos, 'GOAL'); if (frameData.final_path) { const pathColor = frameData.algorithm === 'aco' ? 'PATH' : 'ASTAR_PATH'; this.drawPath(frameData.final_path, pathColor, 3, frameData.algorithm === 'astar' ? [5, 5] : []); } } else if (frameData.mode === 'exploration') { this.drawGrid(frameData.known_grid, { 0: 'UNKNOWN', 1: 'FREE', 2: 'OBSTACLE' }); if (frameData.frontiers) frameData.frontiers.forEach(f => this.drawCircle(f, 'FRONTIER')); if (frameData.path_to_target) this.drawPath(frameData.path_to_target, 'PATH', 2); this.drawCircle(frameData.robot_pos, 'ROBOT'); } }
+}
+class App {
+    constructor() { this.elements = {}; this.cacheDOMElements(); this.renderer = new Renderer(this.elements.mainCanvas); this.state = {}; this.resetState(); this.socket = null; this.drawingCtx = this.elements.drawingCanvas.getContext('2d'); this.drawnGrid = null; this.isDrawing = false; this.init(); }
+    resetState(isFullReset = true) { const mode = isFullReset ? 'path_planning' : this.state.currentMode; this.state = { isSimulating: false, currentMode: mode, grid: null, width: 0, height: 0, startPos: null, goalPos: null, knownGrid: null, robotPos: null }; this.updateInfo("N/A"); }
+    cacheDOMElements() { const ids = ["mode-switch", "map-source", "generate-map-panel", "draw-map-panel", "path-planning-params", "exploration-params", "run-simulation-btn", "generate-map-btn", "confirm-draw-btn", "clear-canvas-btn", "main-canvas", "drawing-canvas", "status-text", "info-text", "stat1-label", "stat2-label", "map-type", "obstacle-perc-group", "visualizer-tab", "explanation-tab", "visualizer-container"]; ids.forEach(id => this.elements[id.replace(/-(\w)/g, (_, g) => g.toUpperCase())] = document.getElementById(id)); }
+    init() { this.initEventListeners(); this.updateUIVisibility(); this.connect(); }
+    connect() { const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'; this.socket = new WebSocket(`${protocol}//${window.location.host}/ws`); this.socket.onopen = () => { this.updateStatus("连接成功！", "info"); this.generateMap(); }; this.socket.onmessage = (event) => this.handleSocketMessage(JSON.parse(event.data)); this.socket.onclose = () => { this.updateStatus("连接已断开", "error"); this.setAllControls(true, true); }; this.socket.onerror = (e) => { console.error("WebSocket Error:", e); this.updateStatus("连接失败！请检查后端是否运行。", "error"); }; }
+    
+    initEventListeners() {
+        this.elements.modeSwitch.onchange = () => { this.updateUIVisibility(); this.generateMap(); };
+        this.elements.mapSource.onchange = () => { this.updateUIVisibility(); if (this.elements.mapSource.value === 'generate') { this.generateMap(); } };
+        this.elements.mapType.onchange = () => this.generateMap();
+        this.elements.generateMapBtn.onclick = () => this.generateMap();
+        this.elements.runSimulationBtn.onclick = () => this.runSimulation();
+        this.elements.confirmDrawBtn.onclick = () => this.confirmDrawnMap();
+        this.elements.clearCanvasBtn.onclick = () => this.clearDrawingCanvas();
+        document.querySelectorAll('input[type="range"]').forEach(slider => { const valueSpan = document.getElementById(slider.id + '-val'); if (valueSpan) { valueSpan.textContent = slider.value; slider.addEventListener('input', () => { valueSpan.textContent = slider.value; if ((slider.id === 'map-width' || slider.id === 'map-height')) { this.setupDrawingCanvas(); } }); } });
+        const canvas = this.elements.drawingCanvas;
+        canvas.onmousedown = (e) => { this.isDrawing = true; this.drawOnCanvas(e); }; canvas.onmouseup = () => { this.isDrawing = false; }; canvas.onmouseleave = () => { this.isDrawing = false; }; canvas.onmousemove = (e) => this.drawOnCanvas(e);
+    }
+    
+    updateUIVisibility() {
+        this.state.currentMode = this.elements.modeSwitch.value; 
+        const isExploration = this.state.currentMode === 'exploration';
+        const drawOption = this.elements.mapSource.querySelector('option[value="draw"]');
+        if (drawOption) { drawOption.disabled = !isExploration; }
+        if (!isExploration && this.elements.mapSource.value === 'draw') { this.elements.mapSource.value = 'generate'; }
+        const useDrawing = this.elements.mapSource.value === 'draw';
+        const isDeceptive = this.elements.mapType.value === 'deceptive_hallway';
+        this.elements.pathPlanningParams.classList.toggle('hidden', isExploration);
+        this.elements.explorationParams.classList.toggle('hidden', !isExploration);
+        document.getElementById('use-elitist').disabled = isExploration;
+        this.elements.stat2Label.textContent = isExploration ? "探索进度 / 步数" : "路径长度 / 迭代";
+        this.elements.generateMapPanel.classList.toggle('hidden', useDrawing);
+        this.elements.drawMapPanel.classList.toggle('hidden', !useDrawing);
+        this.elements.obstaclePercGroup.classList.toggle('hidden', isDeceptive || useDrawing); 
+        if (useDrawing && !this.drawnGrid) this.setupDrawingCanvas();
+    }
+    getParams() { const params = {}; const allParamIds = ["mode-switch", "map-width", "map-height", "map-type", "obstacle-perc", "n-ants-pp", "n-iterations-pp", "sensor-range", "n-ants-exp", "n-iterations-exp", "alpha", "beta", "evaporation", "use-elitist"]; allParamIds.forEach(id => { const el = document.getElementById(id); if (el) { params[id.replace(/-/g, '_')] = el.type === 'checkbox' ? el.checked : el.value; } }); return params; }
+    setAllControls(isSimulating, disableAll = false) { this.state.isSimulating = isSimulating; const controls = document.querySelectorAll('.sidebar button, .sidebar select, .sidebar input'); controls.forEach(control => { control.disabled = isSimulating; }); if (disableAll) return; this.elements.runSimulationBtn.disabled = isSimulating || !this.state.grid; }
+    sendMessage(data) { if (this.socket && this.socket.readyState === WebSocket.OPEN) { this.socket.send(JSON.stringify(data)); } else { this.updateStatus("无法发送消息，连接已断开。", "error"); } }
+    generateMap() { if (this.state.isSimulating) return; this.resetState(false); this.setAllControls(true); this.updateStatus("正在生成地图...", "info"); this.sendMessage({ action: "generate_map", params: this.getParams() }); }
+    runSimulation() { if (this.state.isSimulating || !this.state.grid) return; this.setAllControls(true); const params = this.getParams(); const action = this.state.currentMode === 'path_planning' ? "run_path_planning" : "run_exploration"; const payload = { action: action, params: { ...params, grid: this.state.grid, start_pos: this.state.startPos, goal_pos: this.state.goalPos } }; this.updateStatus("模拟运行中...", "info"); this.sendMessage(payload); }
+    handleSocketMessage(data) { try { switch (data.type) {
+        case "map_generated": this.state.grid = data.grid; this.state.width = data.width; this.state.height = data.height; this.state.startPos = data.start_pos; this.state.goalPos = data.goal_pos; this.state.robotPos = data.start_pos; this.drawInitialMap(); this.updateStatus("地图已就绪", "info"); this.setAllControls(false); break;
+        case "planning_update": this.renderer.render({ mode: 'planning', grid: this.state.grid, start_pos: this.state.startPos, goal_pos: this.state.goalPos, pheromone_map: data.pheromone_map, ant_paths: data.ant_paths }); this.updateStatus(`迭代中: ${data.iteration}/${data.total_iterations}`); this.updateInfo(`${data.iteration} / ${data.total_iterations}`); break;
+        case "planning_end": this.renderer.render({ mode: 'planning', grid: this.state.grid, start_pos: this.state.startPos, goal_pos: this.state.goalPos, pheromone_map: data.pheromone_map, final_path: data.path, algorithm: data.algorithm }); this.updateStatus(`找到路径 (${(data.algorithm || 'aco').toUpperCase()})!`, "info"); this.updateInfo(`长度: ${data.path ? data.path.length - 1 : '无'}`); this.setAllControls(false); break;
+        case "exploration_update": this.state.knownGrid = data.known_grid; this.state.robotPos = data.robot_pos; this.state.steps = data.steps; this.state.explorationProgress = data.progress; this.renderer.render({ mode: 'exploration', known_grid: this.state.knownGrid, robot_pos: this.state.robotPos, frontiers: data.frontiers }); this.updateStatus(`探索中...`); this.updateInfo(`${this.state.explorationProgress.toFixed(1)}% | ${this.state.steps} 步`); break;
+        case "robot_move": this.state.robotPos = data.pos; this.state.knownGrid = data.known_grid; this.state.steps = data.steps; this.renderer.render({ mode: 'exploration', known_grid: this.state.knownGrid, robot_pos: this.state.robotPos, path_to_target: data.path_to_target }); this.updateInfo(`${this.state.explorationProgress.toFixed(1)}% | ${this.state.steps} 步`); break;
+        case "exploration_end": this.state.knownGrid = data.known_grid; this.state.robotPos = data.robot_pos; this.renderer.render({ mode: 'exploration', known_grid: this.state.knownGrid, robot_pos: this.state.robotPos }); this.updateStatus(data.reason, "info"); this.updateInfo(`${data.progress.toFixed(1)}% | 总步数: ${data.steps}`); this.setAllControls(false); break;
+    } } catch (e) { console.error("前端处理消息时出错:", e, "\n收到的数据:", data); this.updateStatus("前端处理消息时出错！", "error"); } }
+    drawInitialMap() { if (!this.state.grid || !this.elements.visualizerContainer) return; this.renderer.cellSize = Math.max(5, Math.min(this.elements.visualizerContainer.clientWidth / this.state.width, this.elements.visualizerContainer.clientHeight / this.state.height) * 0.95); this.renderer.resize(this.state.width, this.state.height); if (this.state.currentMode === 'path_planning') { this.renderer.render({ mode: 'planning', grid: this.state.grid, start_pos: this.state.startPos, goal_pos: this.state.goalPos }); } else { this.state.knownGrid = Array(this.state.height).fill(0).map(() => Array(this.state.width).fill(0)); if (this.state.startPos) { this.state.knownGrid[this.state.startPos[0]][this.state.startPos[1]] = 1; } this.renderer.render({ mode: 'exploration', known_grid: this.state.knownGrid, robot_pos: this.state.startPos }); } }
+    updateStatus(message, type = 'info') { this.elements.statusText.textContent = message; this.elements.statusText.className = `value ${type}`; }
+    updateInfo(message) { this.elements.infoText.textContent = message; }
+    setupDrawingCanvas() { const mapWidth = parseInt(document.getElementById('map-width').value); const mapHeight = parseInt(document.getElementById('map-height').value); this.drawnGrid = Array(mapHeight).fill(0).map(() => Array(mapWidth).fill(1)); const canvasEl = this.elements.drawingCanvas; const parentWidth = canvasEl.parentElement.clientWidth; canvasEl.width = parentWidth; canvasEl.height = Math.round(parentWidth * (mapHeight / mapWidth)); this.clearDrawingCanvas(true); }
+    drawOnCanvas(event) { if (!this.isDrawing || !this.drawnGrid) return; const mapHeight = this.drawnGrid.length; const mapWidth = this.drawnGrid[0].length; const rect = this.elements.drawingCanvas.getBoundingClientRect(); const x = event.clientX - rect.left; const y = event.clientY - rect.top; const c = Math.floor((x / rect.width) * mapWidth); const r = Math.floor((y / rect.height) * mapHeight); if (r >= 0 && r < mapHeight && c >= 0 && c < mapWidth) { const newVal = event.shiftKey ? 1 : 2; if (this.drawnGrid[r][c] !== newVal) { this.drawnGrid[r][c] = newVal; this.redrawDrawingCanvas(); } } }
+    redrawDrawingCanvas() { const mapHeight = this.drawnGrid.length; const mapWidth = this.drawnGrid[0].length; const cellWidthOnCanvas = this.elements.drawingCanvas.width / mapWidth; const cellHeightOnCanvas = this.elements.drawingCanvas.height / mapHeight; this.drawingCtx.fillStyle = '#FFFFFF'; this.drawingCtx.fillRect(0, 0, this.elements.drawingCanvas.width, this.elements.drawingCanvas.height); for (let r = 0; r < mapHeight; r++) { for (let c = 0; c < mapWidth; c++) { if (this.drawnGrid[r][c] === 2) { this.drawingCtx.fillStyle = '#3C3C3C'; this.drawingCtx.fillRect(c * cellWidthOnCanvas, r * cellHeightOnCanvas, cellWidthOnCanvas, cellHeightOnCanvas); } } } }
+    clearDrawingCanvas(isSetup = false) { if (!isSetup) { this.setupDrawingCanvas(); return; } const mapHeight = this.drawnGrid.length; const mapWidth = this.drawnGrid[0].length; this.drawnGrid = Array(mapHeight).fill(0).map(() => Array(mapWidth).fill(1)); this.redrawDrawingCanvas(); }
+    confirmDrawnMap() { if (this.state.isSimulating || !this.drawnGrid) return; this.resetState(false); this.setAllControls(true); this.updateStatus("加载手绘地图...", "info"); this.sendMessage({ action: "from_drawing", params: { grid: this.drawnGrid, mode: this.state.currentMode } }); }
+}
+document.addEventListener('DOMContentLoaded', () => { window.app = new App(); });
+</script>
+</body>
+</html>
